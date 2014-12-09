@@ -1,69 +1,100 @@
 module PuppyBreeder::Repos
-  class Puppies
-    def initialize
-      @puppies = {}
+  class Puppies < Repo
+    def create_table
+      command = <<-SQL
+        CREATE TABLE IF NOT EXISTS puppies(
+          id SERIAL PRIMARY KEY,
+          name TEXT,
+          breed INT REFERENCES breeds(id),
+          status TEXT
+        );
+      SQL
+      @db.exec(command)
+    end
+
+    def drop_table
+      command = <<-SQL
+        DROP TABLE IF EXISTS puppies CASCADE;
+      SQL
+      @db.exec(command)
     end
 
     def create(params)
       name = params[:name]
-      name_sym = name.to_sym
       breed = params[:breed]
-      if(breed.class == PuppyBreeder::Breed)
-        puppy = PuppyBreeder::Puppy.new(params)
-        @puppies[name_sym] = puppy
-      else
-        breed_obj = PuppyBreeder.breeds_repo.find_by({name: breed}).first
-        if !breed_obj
-          breed_obj = PuppyBreeder::Breed.new({name: breed})
-        end
-        puppy = PuppyBreeder::Puppy.new({
-          name: name,
-          breed: breed_obj
-        })
-        @puppies[name_sym] = puppy
-      end
+      id = get_breed_id(breed)
+      status = params[:status] || 'available'
+      command = <<-SQL
+        INSERT INTO puppies(name, breed, status)
+        VALUES ($1, $2, $3)
+        RETURNING *;
+      SQL
+      result = @db.exec(command, [name, id, status]).first
+      build_puppy(result)
     end
 
-    def filter(type, spec = '')
-      array = []
-      @puppies.each do |key, puppy|
-        if type == 'name' && puppy.name == spec
-          array << puppy
-        elsif type == 'breed' && puppy.breed.name == spec
-          array << puppy
-        elsif type == 'status' && puppy.status == spec
-          array << puppy
-        elsif type == 'all'
-          array << puppy
-        end
-      end
-      array
+    def get_breed_id(breed)
+      breed = breed.name if breed.class == PuppyBreeder::Breed
+      breed_obj = PuppyBreeder.breeds_repo.find_by({
+        name: breed
+      }).first
+      breed_obj = PuppyBreeder.breeds_repo.create({
+        name: breed
+      }) if !breed_obj
+      breed_obj.id
     end
 
     def find_by(params = {})
       name = params[:name]
       breed = params[:breed]
+      breed_id = get_breed_id(breed)
       status = params[:status]
-      if breed.class == PuppyBreeder::Breed
-        breed = breed.name
-      end
+      command = <<-SQL
+        SELECT * FROM puppies
+      SQL
 
       if name
-        array = filter('name', name)
+        spec = <<-SQL
+          WHERE name = $1;
+        SQL
+        results = @db.exec(command + spec, [name])
       elsif breed
-        array = filter('breed', breed)
+        spec = <<-SQL
+          WHERE breed = $1;
+        SQL
+        results = @db.exec(command + spec, [breed_id])
       elsif status
-        array = filter('status', status)
+        spec = <<-SQL
+          WHERE status = $1;
+        SQL
+        results = @db.exec(command + spec, [status])
       else
-        array = filter('all')
+        results = @db.exec(command)
       end
+      results.map{ |result| build_puppy(result) }
     end
 
     def update(params)
-      name = params[:name].to_sym
+      name = params[:name]
       status = params[:status]
-      @puppies[name].status = status
-      @puppies[name]
+      command = <<-SQL
+        UPDATE puppies SET status = $1 WHERE name = $2 RETURNING *;
+      SQL
+      @db.exec(command, [status, name])
+        .map{ |result| build_puppy(result) }.first
+    end
+
+    def build_puppy(params)
+      id = params['id'].to_i
+      name = params['name']
+      breed = PuppyBreeder.breeds_repo.find(params['breed'])
+      status = params['status']
+      PuppyBreeder::Puppy.new(
+        id: id,
+        name: name,
+        breed: breed,
+        status: status
+      )
     end
   end
 end

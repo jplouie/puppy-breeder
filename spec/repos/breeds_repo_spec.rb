@@ -1,7 +1,12 @@
 require_relative '../spec_helper.rb'
 
 describe PuppyBreeder::Repos::Breeds do
-  let(:breeds){ PuppyBreeder::Repos::Breeds.new }
+  let(:breeds){ PuppyBreeder.breeds_repo }
+
+  before(:each){ 
+    PuppyBreeder.drop_tables
+    PuppyBreeder.create_tables
+  }
 
   describe 'create and find_by' do
     it 'adds a new breed to the breeds list' do
